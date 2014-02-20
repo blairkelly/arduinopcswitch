@@ -221,7 +221,7 @@ void loop() {
 
 void addtosbuffer (String param, String value) {
 	if(sBuffer == "") {
-		sBuffer = "t=" + (String)millis() + param + "=" + value;
+		sBuffer = "t=" + (String)millis() + "&" + param + "=" + value;
 	} else {
 		sBuffer = sBuffer + "&" + param + "=" + value;
 	}
@@ -231,9 +231,14 @@ void delegate(String cmd, int cmdval) {
 	if (cmd.equals("p")) {
 		digitalWrite(pin_pwr, HIGH);
 		delay(cmdval);
-	} else if (cmd.equals("s")) {
 		digitalWrite(pin_pwr, LOW);
-		delay(cmdval);
+	}
+	if (cmd.equals("r")) {
+		if(cmdval == 1) {
+			digitalWrite(pin_rst, HIGH);
+			delay(200);
+			digitalWrite(pin_rst, LOW);
+		}
 	}
 	if(cmd.equals("f")) {
 		if(cmdval == 1) {

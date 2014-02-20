@@ -232,26 +232,32 @@ void delegate(String cmd, int cmdval) {
 		digitalWrite(pin_pwr, HIGH);
 		delay(cmdval);
 		digitalWrite(pin_pwr, LOW);
+		addtobuffer("actionstatus", "finished POWER button press");
 	}
 	if (cmd.equals("r")) {
 		if(cmdval == 1) {
 			digitalWrite(pin_rst, HIGH);
 			delay(200);
 			digitalWrite(pin_rst, LOW);
+			addtobuffer("actionstatus", "finished RESET button press");
 		}
 	}
 	if(cmd.equals("f")) {
 		if(cmdval == 1) {
 			report_pwr_led = true;
+			addtobuffer("status", "power led status reporting is on");
 		} else {
 			report_pwr_led = false;
+			addtobuffer("status", "power led status reporting is off");
 		}
 	}
 	if(cmd.equals("c")) {
 		if(cmdval == 1) {
 			report_comp_state = true;
+			addtobuffer("status", "computer power state reporting ON");
 		} else {
 			report_comp_state = false;
+			addtobuffer("status", "computer power state reporting OFF");
 		}
 	}
 }

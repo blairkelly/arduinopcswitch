@@ -13,6 +13,7 @@ int pin_led_ide = 13;
 //vars
 int debounce_delay = 66;
 String sBuffer = "";
+boolean firstrun = true;
 
 boolean read_state = false;
 boolean under_remote_command = false;
@@ -30,14 +31,16 @@ unsigned long time_rst_last_state = millis();
 boolean debouncing_rst_switch = false;
 boolean switch_state_changed_rst = false;
 
-boolean state_mb_pwr_led = false;
-boolean last_state_mb_pwr_led = false;
+boolean state_mb_pwr_led = true; //INVERTED. When true, MB LED is off
+boolean last_state_mb_pwr_led = state_mb_pwr_led;
 boolean debouncing_mb_pwr_led = false;
 unsigned long time_mb_pwr_led_last_state = millis();
 boolean state_changed_pwr_led = false;
 
 boolean computer_power_state = false;
 boolean sleeping = false;
+boolean sleeping_count = 0;
+boolean sleeping_count_max = 6;
 
 //com vars
 //general
@@ -53,7 +56,6 @@ boolean report_comp_state = true;
 
 void setup() {
 	Serial.begin(57600);
-  	Serial.println(" ");
 
   	//set pinmodes
   	pinMode(pin_read_rst_switch, INPUT);
@@ -137,9 +139,16 @@ void loop() {
 	//read MB led signals	
 	//pwr led
 	read_state = digitalRead(pin_mb_led_pwr);
+	if(false) {
+		Serial.println(read_state);
+		delay(250);
+	}
 	if((read_state != last_state_mb_pwr_led) && !debouncing_mb_pwr_led) {
 		//state changed
 		debouncing_mb_pwr_led = true;
+		if((millis() - time_mb_pwr_led_last_state) <= 750) {
+			sleeping_count++;
+		}
 		time_mb_pwr_led_last_state = millis();
 	} else if ((read_state != last_state_mb_pwr_led) && debouncing_mb_pwr_led) {
 		if((millis() - debounce_delay) > time_mb_pwr_led_last_state) {
@@ -150,7 +159,7 @@ void loop() {
 		}
 	}
 	if(state_changed_pwr_led) {
-		if(state_mb_pwr_led) {
+		if(!state_mb_pwr_led) {
 			if(report_pwr_led) {
 				addtosbuffer("mbpwrledstate", "on");
 			}
@@ -162,31 +171,36 @@ void loop() {
 		state_changed_pwr_led = false;
 	}
 	//ide led
+	/*
 	read_state = digitalRead(pin_mb_led_ide);
 	if(read_state) {
 		digitalWrite(pin_led_ide, HIGH);
 	} else {
 		digitalWrite(pin_led_ide, LOW);
 	}
+	*/
 
 	//comp state
-	if((millis() - time_mb_pwr_led_last_state) > 750) {
-		if(computer_power_state != state_mb_pwr_led) {
+	if((millis() - time_mb_pwr_led_last_state) <= 750) {
+		//power led changed state sometime in the last 750 milliseconds.
+		if (!sleeping && (sleeping_count >= sleeping_count_max)) {
+			addtosbuffer("computerpowerstate", "sleeping");
+			sleeping = true;
+			sleeping_count = 0;
+		}
+	} else if ( ((millis() - time_mb_pwr_led_last_state) > 750) ) {
+		if((computer_power_state != state_mb_pwr_led) || firstrun || sleeping) {
 			computer_power_state = state_mb_pwr_led;
-			if(computer_power_state) {
+			if(!computer_power_state) {
 				addtosbuffer("computerpowerstate", "on");
 			} else {
 				addtosbuffer("computerpowerstate", "off");
 			}
 			sleeping = false;
-		}
-	} else {
-		if(!sleeping) {
-			addtosbuffer("computerpowerstate", "sleeping");
-			sleeping = true;
+			sleeping_count = 0;
+			firstrun = false;
 		}
 	}
-
 
 	//handle stuff coming in from outside.
 	if(!under_local_command) {
@@ -232,35 +246,37 @@ void delegate(String cmd, int cmdval) {
 		digitalWrite(pin_pwr, HIGH);
 		delay(cmdval);
 		digitalWrite(pin_pwr, LOW);
-		addtobuffer("actionstatus", "finished POWER button press");
+		addtosbuffer("actionstatus", "finished POWER button press");
 	}
 	if (cmd.equals("r")) {
 		if(cmdval == 1) {
 			digitalWrite(pin_rst, HIGH);
 			delay(200);
 			digitalWrite(pin_rst, LOW);
-			addtobuffer("actionstatus", "finished RESET button press");
+			addtosbuffer("actionstatus", "finished RESET button press");
 		}
 	}
 	if(cmd.equals("f")) {
 		if(cmdval == 1) {
 			report_pwr_led = true;
-			addtobuffer("status", "power led status reporting is on");
+			addtosbuffer("status", "power led status reporting is on");
 		} else {
 			report_pwr_led = false;
-			addtobuffer("status", "power led status reporting is off");
+			addtosbuffer("status", "power led status reporting is off");
 		}
 	}
 	if(cmd.equals("c")) {
 		if(cmdval == 1) {
 			report_comp_state = true;
-			addtobuffer("status", "computer power state reporting ON");
+			addtosbuffer("status", "computer power state reporting ON");
 		} else {
 			report_comp_state = false;
-			addtobuffer("status", "computer power state reporting OFF");
+			addtosbuffer("status", "computer power state reporting OFF");
 		}
 	}
 }
+
+
 void serialListen()
 {
   char arduinoSerialData; //FOR CONVERTING BYTE TO CHAR. here is stored information coming from the arduino.
@@ -294,3 +310,7 @@ void serialListen()
     }
   }
 }
+
+
+
+

@@ -55,8 +55,8 @@ unsigned long last_heartbeat_request_time = millis();
 unsigned long heartbeat_wait = 900000; //15 minutes
 int heartbeat_response_delay = 30000; //wait thirty seconds to hear a response from raspi
 boolean heartbeat = false;
+boolean heartbeat_requested = false;
 boolean defibbing = false;
-
 //reporting states
 boolean report_pwr_led = false;
 boolean report_comp_state = true;
@@ -192,10 +192,11 @@ void loop() {
 	if((millis() - last_heartbeat_request_time) > heartbeat_wait) {
 		heartbeat = false;
 	}
-	if(!heartbeat) {
+	if(!heartbeat && !heartbeat_requested) {
 		//ask for a heartbeat
 		last_heartbeat_request_time = millis();
 		addtosbuffer("rhb", "1");
+		heartbeat_requested = true;
 	}
 	if(!heartbeat && !defibbing) {
 		if ((millis() - last_heartbeat_request_time) > heartbeat_response_delay) {
@@ -315,9 +316,18 @@ void delegate(String cmd, int cmdval) {
 		if(cmdval == 1) {
 			//received a heartbeat
 			addtosbuffer("comstatus", "received_heartbeat");
+			heartbeat = true;
+			heartbeat_requested = false;
 		}
 	}
-
+	if(cmd.equals("d")) {
+		if(cmdval == 1) {
+			//stop defibbing
+			heartbeat = false;
+			heartbeat_requested = false;
+			defibbing = false;
+		}
+	}
 	if(cmd.equals("s")) {
 		if(cmdval == 1) {
 			//please report computerpowerstate

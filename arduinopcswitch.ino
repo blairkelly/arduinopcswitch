@@ -40,7 +40,7 @@ boolean state_changed_pwr_led = false;
 boolean computer_power_state = false;
 boolean sleeping = false;
 boolean sleeping_count = 0;
-boolean sleeping_count_max = 6;
+boolean sleeping_count_max = 4;
 
 //com vars
 //general
@@ -49,7 +49,15 @@ int usbCommandVal = 0;
 boolean USBcommandExecuted = true;
 String usbCommand = "";
 unsigned long lastcmdtime = millis();
-//specific
+String computerpowerstate = "";
+//heartbeat
+unsigned long last_heartbeat_request_time = millis();
+unsigned long heartbeat_wait = 900000; //15 minutes
+int heartbeat_response_delay = 30000; //wait thirty seconds to hear a response from raspi
+boolean heartbeat = false;
+boolean defibbing = false;
+
+//reporting states
 boolean report_pwr_led = false;
 boolean report_comp_state = true;
 
@@ -161,11 +169,11 @@ void loop() {
 	if(state_changed_pwr_led) {
 		if(!state_mb_pwr_led) {
 			if(report_pwr_led) {
-				addtosbuffer("mbpwrledstate", "on");
+				addtosbuffer("mbled", "on");
 			}
 		} else {
 			if(report_pwr_led) {
-				addtosbuffer("mbpwrledstate", "off");
+				addtosbuffer("mbled", "off");
 			}
 		}
 		state_changed_pwr_led = false;
@@ -180,11 +188,35 @@ void loop() {
 	}
 	*/
 
+	//handle heartbeat
+	if((millis() - last_heartbeat_request_time) > heartbeat_wait) {
+		heartbeat = false;
+	}
+	if(!heartbeat) {
+		//ask for a heartbeat
+		last_heartbeat_request_time = millis();
+		addtosbuffer("rhb", "1");
+	}
+	if(!heartbeat && !defibbing) {
+		if ((millis() - last_heartbeat_request_time) > heartbeat_response_delay) {
+			//haven't heard from the raspberry pi since we sent the heartbeat request
+			//turn on the computer
+			defibbing = true;
+			addtosbuffer("actionstatus", "defibbing");
+			if((computerpowerstate == "off") || (computerpowerstate == "sleeping")) {
+				digitalWrite(pin_pwr, HIGH);
+				delay(850);
+				digitalWrite(pin_pwr, LOW);
+			}
+		}
+	}
+
 	//comp state
 	if((millis() - time_mb_pwr_led_last_state) <= 750) {
 		//power led changed state sometime in the last 750 milliseconds.
 		if (!sleeping && (sleeping_count >= sleeping_count_max)) {
-			addtosbuffer("computerpowerstate", "sleeping");
+			computerpowerstate = "sleeping";
+			addtosbuffer("computerpowerstate", computerpowerstate);
 			sleeping = true;
 			sleeping_count = 0;
 		}
@@ -192,22 +224,17 @@ void loop() {
 		if((computer_power_state != state_mb_pwr_led) || firstrun || sleeping) {
 			computer_power_state = state_mb_pwr_led;
 			if(!computer_power_state) {
-				addtosbuffer("computerpowerstate", "on");
+				computerpowerstate = "on";
+				addtosbuffer("computerpowerstate", computerpowerstate);
 			} else {
-				addtosbuffer("computerpowerstate", "off");
+				computerpowerstate = "off";
+				addtosbuffer("computerpowerstate", computerpowerstate);
 			}
 			sleeping = false;
 			sleeping_count = 0;
 			firstrun = false;
 		}
 	}
-
-	//handle stuff coming in from outside.
-	if(!under_local_command) {
-
-	}
-
-
 
 	//print sBuffer
 	if(sBuffer != "") {
@@ -216,6 +243,15 @@ void loop() {
 	}
 	
 }  /* end of loop */
+
+
+
+
+
+
+
+
+
 
 
 
@@ -246,34 +282,49 @@ void delegate(String cmd, int cmdval) {
 		digitalWrite(pin_pwr, HIGH);
 		delay(cmdval);
 		digitalWrite(pin_pwr, LOW);
-		addtosbuffer("actionstatus", "finished POWER button press");
+		addtosbuffer("actionstatus", "fpbp");
 	}
 	if (cmd.equals("r")) {
 		if(cmdval == 1) {
 			digitalWrite(pin_rst, HIGH);
 			delay(200);
 			digitalWrite(pin_rst, LOW);
-			addtosbuffer("actionstatus", "finished RESET button press");
+			addtosbuffer("actionstatus", "frbp");
 		}
 	}
 	if(cmd.equals("f")) {
 		if(cmdval == 1) {
 			report_pwr_led = true;
-			addtosbuffer("status", "power led status reporting is on");
+			addtosbuffer("comstatus", "pled_status_reporting_on");
 		} else {
 			report_pwr_led = false;
-			addtosbuffer("status", "power led status reporting is off");
+			addtosbuffer("comstatus", "pled_status_reporting_off");
 		}
 	}
 	if(cmd.equals("c")) {
 		if(cmdval == 1) {
 			report_comp_state = true;
-			addtosbuffer("status", "computer power state reporting ON");
+			addtosbuffer("comstatus", "computerpower_status_reporting_on");
 		} else {
 			report_comp_state = false;
-			addtosbuffer("status", "computer power state reporting OFF");
+			addtosbuffer("comstatus", "computerpower_status_reporting_off");
 		}
 	}
+
+	if(cmd.equals("h")) {
+		if(cmdval == 1) {
+			//received a heartbeat
+			addtosbuffer("comstatus", "received_heartbeat");
+		}
+	}
+
+	if(cmd.equals("s")) {
+		if(cmdval == 1) {
+			//please report computerpowerstate
+			addtosbuffer("computerpowerstate", computerpowerstate);
+		}
+	}
+
 }
 
 

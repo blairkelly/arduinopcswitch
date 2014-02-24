@@ -1,5 +1,5 @@
 //Arduino PC Pwr Switch
-boolean debugging = true;
+boolean debugging = false;
 //define pins
 int pin_read_rst_switch = 2;
 int pin_read_pwr_switch = 4;
@@ -13,6 +13,7 @@ int pin_led_ide = 13;
 //vars
 boolean cold_start = true;
 boolean booting_up = true;
+boolean computer_state_checked = false;
 unsigned long bootup_time = millis();
 unsigned long thetime = bootup_time;
 
@@ -133,7 +134,7 @@ void handle_heartbeat() {
 		}
 	}
 }
-void checkbootstatus() {
+void checkarduinobootstatus() {
 	if(booting_up) {
 		if(cold_start) {
 			addtosbuffer("bootstatus", "cold_start");
@@ -141,6 +142,7 @@ void checkbootstatus() {
 		} else {
 			addtosbuffer("bootstatus", "warm_start");
 		}
+		computer_state_checked = false;
 		booting_up=false;
 	}
 }
@@ -207,16 +209,17 @@ void handle_switches() {
 void read_mb_leds() {
 	//read MB led signals	
 	//pwr led
+	thetime = millis();
 	read_state = digitalRead(pin_mb_led_pwr);
 	if((read_state != last_state_mb_pwr_led) && !debouncing_mb_pwr_led) {
 		//state changed
 		debouncing_mb_pwr_led = true;
-		if((millis() - time_mb_pwr_led_last_state) <= 750) {
+		if((thetime - time_mb_pwr_led_last_state) <= 750) {
 			sleeping_count++;
 		}
-		time_mb_pwr_led_last_state = millis();
+		time_mb_pwr_led_last_state = thetime;
 	} else if ((read_state != last_state_mb_pwr_led) && debouncing_mb_pwr_led) {
-		if((millis() - debounce_delay) > time_mb_pwr_led_last_state) {
+		if((thetime - debounce_delay) > time_mb_pwr_led_last_state) {
 			state_mb_pwr_led = read_state;
 			last_state_mb_pwr_led = read_state;
 			state_changed_pwr_led = true;
@@ -247,7 +250,8 @@ void read_mb_leds() {
 }
 //comp state
 void assess_comp_state() {
-	if((millis() - time_mb_pwr_led_last_state) <= 750) {
+	thetime = millis();
+	if((thetime - time_mb_pwr_led_last_state) <= 750) {
 		//power led changed state sometime in the last 750 milliseconds.
 		if (!sleeping && (sleeping_count >= sleeping_count_max)) {
 			computerpowerstate = "sleeping";
@@ -255,8 +259,8 @@ void assess_comp_state() {
 			sleeping = true;
 			sleeping_count = 0;
 		}
-	} else if ( ((millis() - time_mb_pwr_led_last_state) > 750) ) {
-		if((boolean_computer_power_state != state_mb_pwr_led) || booting_up || sleeping) {
+	} else if ( ((thetime - time_mb_pwr_led_last_state) > 750) ) {
+		if((boolean_computer_power_state != state_mb_pwr_led) || !computer_state_checked || sleeping) {
 			boolean_computer_power_state = state_mb_pwr_led;
 			if(!boolean_computer_power_state) {
 				computerpowerstate = "on";
@@ -265,6 +269,7 @@ void assess_comp_state() {
 				computerpowerstate = "off";
 				addtosbuffer("computerpowerstate", computerpowerstate);
 			}
+			computer_state_checked = true;
 			sleeping = false;
 			sleeping_count = 0;
 		}
@@ -365,10 +370,10 @@ void serialListen()
 }
 
 void loop() {
-	checkbootstatus();
 	serialListen();
 	handle_heartbeat();
 	read_mb_leds();
 	assess_comp_state(); //This needs to come after read_mb_leds
+	checkarduinobootstatus();
 	printsbuffer();
 }  /* end of loop */

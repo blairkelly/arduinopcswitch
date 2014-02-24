@@ -1,5 +1,5 @@
 //Arduino PC Pwr Switch
-
+boolean debugging = true;
 //define pins
 int pin_read_rst_switch = 2;
 int pin_read_pwr_switch = 4;
@@ -11,9 +11,12 @@ int pin_led_pwr = 12;
 int pin_led_ide = 13;
 
 //vars
+boolean cold_start = true;
+boolean booting_up = true;
+unsigned long bootup_time = millis();
+unsigned long thetime = bootup_time;
+
 int debounce_delay = 66;
-String sBuffer = "";
-boolean firstrun = true;
 
 boolean read_state = false;
 boolean under_remote_command = false;
@@ -37,29 +40,28 @@ boolean debouncing_mb_pwr_led = false;
 unsigned long time_mb_pwr_led_last_state = millis();
 boolean state_changed_pwr_led = false;
 
-boolean computer_power_state = false;
+//com
+String sBuffer = "";
+String computerpowerstate = "";
+boolean boolean_computer_power_state = false;
 boolean sleeping = false;
 boolean sleeping_count = 0;
 boolean sleeping_count_max = 4;
-
-//com vars
-//general
 String usbInstructionDataString = "";
 int usbCommandVal = 0;
 boolean USBcommandExecuted = true;
 String usbCommand = "";
 unsigned long lastcmdtime = millis();
-String computerpowerstate = "";
-//heartbeat
-unsigned long last_heartbeat_request_time = millis();
-unsigned long heartbeat_wait = 900000; //15 minutes
-int heartbeat_response_delay = 30000; //wait thirty seconds to hear a response from raspi
-boolean heartbeat = false;
-boolean heartbeat_requested = false;
-boolean defibbing = false;
 //reporting states
 boolean report_pwr_led = false;
 boolean report_comp_state = true;
+//heartbeat
+unsigned long last_heartbeat_request_time = millis();
+unsigned long heartbeat_wait = 900000; //15 minutes
+int heartbeat_response_delay = 30000;   //wait this many milliseconds to hear a response from raspi
+boolean heartbeat = false;
+boolean heartbeat_requested = false;
+boolean defibbing = false;
 
 
 void setup() {
@@ -81,12 +83,71 @@ void setup() {
   	digitalWrite(pin_pwr, LOW);
   	digitalWrite(pin_rst, LOW);
 
-  	delay(debounce_delay);
+  	if(debugging) {
+		heartbeat_wait = 6000; //6 seconds
+		heartbeat_response_delay = 3000;   //three seconds
+	}
+
+  	delay(100);  //wait
 }
 
-void loop() {
-	serialListen();
-
+/*functions*/
+void printsbuffer () {
+	//print sBuffer
+	if(sBuffer != "") {
+		Serial.println(sBuffer);
+		sBuffer = "";
+	}
+}
+void addtosbuffer (String param, String value) {
+	if(sBuffer == "") {
+		sBuffer = "t=" + (String)millis() + "&" + param + "=" + value;
+	} else {
+		sBuffer = sBuffer + "&" + param + "=" + value;
+	}
+}
+void handle_heartbeat() {
+	if(!cold_start) {
+		thetime = millis();
+		if(!heartbeat_requested && !defibbing) {
+			if( thetime > (last_heartbeat_request_time + heartbeat_wait) ) {
+				//heartbeat is positive but has become stale. request a new heartbeat
+				last_heartbeat_request_time = thetime;
+				addtosbuffer("rhb", "1");
+				heartbeat_requested = true;
+				heartbeat = false;
+			}
+		}
+		if(!heartbeat && heartbeat_requested && !defibbing) {
+			if ((thetime - last_heartbeat_request_time) > heartbeat_response_delay) {
+				//haven't heard from the raspberry pi since we sent the heartbeat request
+				//turn on the computer
+				defibbing = true;
+				addtosbuffer("actionstatus", "defibbing");
+				if((computerpowerstate == "off") || (computerpowerstate == "sleeping")) {
+					digitalWrite(pin_pwr, HIGH);
+					delay(850);
+					digitalWrite(pin_pwr, LOW);
+				}
+			}
+		}
+	}
+}
+void checkbootstatus() {
+	if(booting_up) {
+		if(cold_start) {
+			addtosbuffer("bootstatus", "cold_start");
+			cold_start = false;
+		} else {
+			addtosbuffer("bootstatus", "warm_start");
+		}
+		booting_up=false;
+	}
+}
+void reset_vars() {
+	//a consequence of testing/development on leonardo
+}
+void handle_switches() {
 	//handle switches
 	if(!under_remote_command) {
 		//handle power switch
@@ -142,15 +203,11 @@ void loop() {
 			switch_state_changed_rst = false;
 		}
 	}
-
-
+}
+void read_mb_leds() {
 	//read MB led signals	
 	//pwr led
 	read_state = digitalRead(pin_mb_led_pwr);
-	if(false) {
-		Serial.println(read_state);
-		delay(250);
-	}
 	if((read_state != last_state_mb_pwr_led) && !debouncing_mb_pwr_led) {
 		//state changed
 		debouncing_mb_pwr_led = true;
@@ -187,32 +244,9 @@ void loop() {
 		digitalWrite(pin_led_ide, LOW);
 	}
 	*/
-
-	//handle heartbeat
-	if((millis() - last_heartbeat_request_time) > heartbeat_wait) {
-		heartbeat = false;
-	}
-	if(!heartbeat && !heartbeat_requested) {
-		//ask for a heartbeat
-		last_heartbeat_request_time = millis();
-		addtosbuffer("rhb", "1");
-		heartbeat_requested = true;
-	}
-	if(!heartbeat && !defibbing) {
-		if ((millis() - last_heartbeat_request_time) > heartbeat_response_delay) {
-			//haven't heard from the raspberry pi since we sent the heartbeat request
-			//turn on the computer
-			defibbing = true;
-			addtosbuffer("actionstatus", "defibbing");
-			if((computerpowerstate == "off") || (computerpowerstate == "sleeping")) {
-				digitalWrite(pin_pwr, HIGH);
-				delay(850);
-				digitalWrite(pin_pwr, LOW);
-			}
-		}
-	}
-
-	//comp state
+}
+//comp state
+void assess_comp_state() {
 	if((millis() - time_mb_pwr_led_last_state) <= 750) {
 		//power led changed state sometime in the last 750 milliseconds.
 		if (!sleeping && (sleeping_count >= sleeping_count_max)) {
@@ -222,9 +256,9 @@ void loop() {
 			sleeping_count = 0;
 		}
 	} else if ( ((millis() - time_mb_pwr_led_last_state) > 750) ) {
-		if((computer_power_state != state_mb_pwr_led) || firstrun || sleeping) {
-			computer_power_state = state_mb_pwr_led;
-			if(!computer_power_state) {
+		if((boolean_computer_power_state != state_mb_pwr_led) || booting_up || sleeping) {
+			boolean_computer_power_state = state_mb_pwr_led;
+			if(!boolean_computer_power_state) {
 				computerpowerstate = "on";
 				addtosbuffer("computerpowerstate", computerpowerstate);
 			} else {
@@ -233,51 +267,9 @@ void loop() {
 			}
 			sleeping = false;
 			sleeping_count = 0;
-			firstrun = false;
 		}
-	}
-
-	//print sBuffer
-	if(sBuffer != "") {
-		Serial.println(sBuffer);
-		sBuffer = "";
-	}
-	
-}  /* end of loop */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-void addtosbuffer (String param, String value) {
-	if(sBuffer == "") {
-		sBuffer = "t=" + (String)millis() + "&" + param + "=" + value;
-	} else {
-		sBuffer = sBuffer + "&" + param + "=" + value;
-	}
+	}	
 }
-
 void delegate(String cmd, int cmdval) {
 	if (cmd.equals("p")) {
 		digitalWrite(pin_pwr, HIGH);
@@ -316,8 +308,10 @@ void delegate(String cmd, int cmdval) {
 		if(cmdval == 1) {
 			//received a heartbeat
 			addtosbuffer("comstatus", "received_heartbeat");
+			last_heartbeat_request_time = millis();
 			heartbeat = true;
 			heartbeat_requested = false;
+			defibbing = false;
 		}
 	}
 	if(cmd.equals("d")) {
@@ -336,8 +330,6 @@ void delegate(String cmd, int cmdval) {
 	}
 
 }
-
-
 void serialListen()
 {
   char arduinoSerialData; //FOR CONVERTING BYTE TO CHAR. here is stored information coming from the arduino.
@@ -372,6 +364,11 @@ void serialListen()
   }
 }
 
-
-
-
+void loop() {
+	checkbootstatus();
+	serialListen();
+	handle_heartbeat();
+	read_mb_leds();
+	assess_comp_state(); //This needs to come after read_mb_leds
+	printsbuffer();
+}  /* end of loop */
